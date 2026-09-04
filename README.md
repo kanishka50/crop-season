@@ -1,11 +1,11 @@
 # Crop Season
 
-An augmented reality tool for teaching crop spacing and crop care to farmers and extension
-trainees.
+An augmented reality app for teaching crop care to farmers and extension trainees.
 
-Spacing is taught as a number. Twenty five centimetres means very little written on a page or
-said out loud. This puts a planting bed on the ground in front of you, at real size, and lets you
-tend it for a season to see what that spacing actually costs and returns.
+Water keeps a crop alive and food makes it grow, and too much of either kills it. That is easy to
+say and hard to feel. This puts a planting bed on the floor in front of you, at real size, and
+gives you five weeks to keep it alive and bring in a harvest. Reaching the far corner of the bed
+means walking round it.
 
 Built for INTE 42312, Virtual and Augmented Reality.
 
@@ -15,8 +15,8 @@ Built for INTE 42312, Virtual and Augmented Reality.
 
 | Mode | What it does | Needs |
 |---|---|---|
-| **Scan a seed packet** | Point the camera at a printed card. The crop appears above it with its spacing. | Any phone with a camera, over `https://` |
-| **Plan your plot** | Place a 1.2 m planting bed on a real floor, water and feed it through a five week season, then harvest it and read the score. | Android Chrome, on an ARCore certified phone |
+| **Scan a seed packet** | Point the camera at a printed card. The crop appears above it, and tapping grows it to full size so you can see how much room one plant needs. | Any phone with a camera, over `https://` |
+| **Grow a season** | Place a 1.2 m planting bed on a real floor, water and feed it through a five week season, then harvest it and read the score. | Android Chrome, on an ARCore certified phone |
 
 The second mode uses WebXR, which no browser on iOS supports. Every iOS browser is built on
 WebKit, so installing Chrome on an iPhone does not change this. The landing page checks the
