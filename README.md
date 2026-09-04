@@ -9,7 +9,9 @@ means walking round it.
 
 Built for INTE 42312, Virtual and Augmented Reality.
 
-**Live site:** _to be added once deployed._
+**Live site:** https://yellow-pony-845825.hostingersite.com
+
+**Source:** https://github.com/kanishka50/crop-season
 
 ## The two modes
 
