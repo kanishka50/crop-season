@@ -1,0 +1,30 @@
+# Crop Season
+#
+# This repository is the app itself, so almost everything here belongs in it. The models, sounds,
+# marker card and the vendored A-Frame bundle are all committed on purpose: the site is served
+# straight from these files and the markerless mode has to run with no internet.
+#
+# So this list is only machine clutter.
+
+# Windows and macOS file explorers
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python leaves these behind if the tools are ever imported rather than run
+__pycache__/
+*.py[cod]
+
+# Node, in case anything is ever installed here. Nothing in the app needs it at runtime.
+node_modules/
+package-lock.json
+
+# Logs and local scratch
+*.log

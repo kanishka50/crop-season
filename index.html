@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Crop Season</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="landing">
+
+  <main class="wrap">
+
+    <header class="hero">
+      <p class="eyebrow">Agricultural extension training</p>
+      <h1>Crop Season</h1>
+      <p class="lede">
+        Spacing is taught as a number. Twenty five centimetres means very little written on a
+        page. See a field at real size on real ground, then keep it alive for a season.
+      </p>
+    </header>
+
+    <nav class="modes">
+
+      <a class="mode" href="./marker.html">
+        <span class="mode-tag">Step 1</span>
+        <h2>Scan a seed packet</h2>
+        <p>Point your camera at a printed seed packet. The crop grows out of the card, so you can
+           see how much room one plant really needs.</p>
+        <span class="mode-support" data-support="marker">Checking your device</span>
+      </a>
+
+      <a class="mode" href="./markerless.html" id="markerlessLink">
+        <span class="mode-tag">Step 2</span>
+        <h2>Grow a season</h2>
+        <p>Put a planting bed on the floor in front of you. Water it, feed it, and harvest
+           whatever survives five weeks.</p>
+        <span class="mode-support" data-support="markerless">Checking your device</span>
+      </a>
+
+    </nav>
+
+    <!-- Marker mode tracks a printed card and nothing else, so anyone arriving at this site
+         without one cannot test half the app. This is the only place that says the card exists. -->
+    <section class="report print-card">
+      <h3>Before you scan</h3>
+      <p class="report-note">
+        Marker mode looks for one printed card. Open it, print it on paper, then point the camera
+        at it. Holding a phone or a monitor up to the camera adds glare and tracks worse.
+      </p>
+      <a class="btn" href="./targets/marker-b.png" target="_blank" rel="noopener">
+        Open the card to print
+      </a>
+    </section>
+
+    <section class="report" id="report" hidden>
+      <h3>What this device supports</h3>
+      <dl id="reportList"></dl>
+      <p class="report-note" id="reportNote"></p>
+    </section>
+
+  </main>
+
+  <script>
+  /*
+   * Capability detection.
+   *
+   * This is not defensive boilerplate. Telling the user plainly what their device can and
+   * cannot do is heuristic 1 (visibility of status) and heuristic 8 (recover from errors).
+   * It is also the screenshot that goes into the testing evidence, whichever way it reports.
+   */
+  (function () {
+    'use strict';
+
+    var results = [];
+
+    function record(label, value, detail) {
+      results.push({ label: label, value: value, detail: detail || '' });
+    }
+
+    function setSupport(name, text, state) {
+      var el = document.querySelector('[data-support="' + name + '"]');
+      if (!el) { return; }
+      el.textContent = text;
+      el.dataset.state = state;
+    }
+
+    function render() {
+      var list = document.getElementById('reportList');
+      list.innerHTML = '';
+
+      results.forEach(function (row) {
+        var dt = document.createElement('dt');
+        dt.textContent = row.label;
+
+        var dd = document.createElement('dd');
+        dd.textContent = row.value + (row.detail ? ' (' + row.detail + ')' : '');
+        dd.dataset.value = row.value;
+
+        list.appendChild(dt);
+        list.appendChild(dd);
+      });
+
+      document.getElementById('report').hidden = false;
+    }
+
+    // Camera needs a secure context. https or localhost, never a plain LAN address.
+    var secure = window.isSecureContext === true;
+    record('Secure context', secure ? 'yes' : 'no',
+           secure ? location.protocol : 'camera will be blocked');
+
+    var hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    record('Camera API', hasCamera ? 'yes' : 'no');
+
+    var hasVibration = typeof navigator.vibrate === 'function';
+    record('Vibration', hasVibration ? 'yes' : 'no');
+
+    var markerOk = secure && hasCamera;
+    setSupport('marker',
+      markerOk ? 'Works on this device' : 'Needs a camera over https',
+      markerOk ? 'ok' : 'blocked');
+
+    // WebXR. navigator.xr is absent entirely on iOS Safari.
+    if (!navigator.xr) {
+      record('WebXR', 'not available');
+      setSupport('markerless', 'Not supported on this device', 'blocked');
+      document.getElementById('markerlessLink').classList.add('is-unavailable');
+      document.getElementById('reportNote').textContent =
+        'This browser has no WebXR, so placing a plot on the ground is not possible here. ' +
+        'Scanning a seed packet still works. For the plot planner, open this page in Chrome ' +
+        'on an Android phone that supports ARCore.';
+      render();
+      return;
+    }
+
+    record('WebXR', 'present');
+
+    navigator.xr.isSessionSupported('immersive-ar').then(function (supported) {
+      record('immersive-ar', supported ? 'supported' : 'not supported');
+
+      if (supported) {
+        setSupport('markerless', 'Works on this device', 'ok');
+      } else {
+        setSupport('markerless', 'Not supported on this device', 'blocked');
+        document.getElementById('markerlessLink').classList.add('is-unavailable');
+        document.getElementById('reportNote').textContent =
+          'WebXR is present but this device cannot start an AR session. On Android this ' +
+          'usually means Google Play Services for AR is missing, or the phone is not ' +
+          'ARCore certified.';
+      }
+
+      render();
+    }).catch(function (err) {
+      record('immersive-ar', 'check failed', err && err.name ? err.name : 'unknown error');
+      setSupport('markerless', 'Could not be checked', 'blocked');
+      render();
+    });
+  }());
+  </script>
+
+</body>
+</html>

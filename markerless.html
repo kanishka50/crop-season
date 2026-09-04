@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Grow a season</title>
+
+  <!--
+    A-Frame 1.8.0, which carries the built-in ar-hit-test component. marker.html pins 1.5.0, and
+    two separate files means two pins with no conflict.
+
+    Served from this repo rather than aframe.io so the mode runs with no internet. A-Frame's text
+    component also fetches its font from a CDN, silently, which would have made the tool labels
+    vanish offline. AFRAME_CDN_ROOT points every asset A-Frame fetches for itself at a local
+    folder, and must be set BEFORE the library script runs.
+  -->
+  <script>window.AFRAME_CDN_ROOT = './vendor/aframe-cdn/';</script>
+  <script src="./vendor/aframe-1.8.0.min.js"></script>
+
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="ar">
+
+  <!-- Shown when the device cannot run an immersive AR session at all. -->
+  <div class="setup" id="unsupported" hidden>
+    <div class="setup-card">
+      <h2>This device cannot place a field</h2>
+      <p id="unsupportedDetail"></p>
+      <p>
+        Scanning a seed packet still works here. To tend a field you need Chrome on an Android
+        phone that supports ARCore, with Google Play Services for AR installed.
+      </p>
+      <a class="btn" href="./marker.html">Scan a seed packet</a>
+      <a class="btn" href="./index.html">Back</a>
+    </div>
+  </div>
+
+  <!-- Handed to WebXR as the DOM overlay, so it keeps rendering once the immersive session
+       starts. Without dom-overlay the session takes the screen and ordinary HTML disappears. -->
+  <div class="hud" id="hud">
+
+    <!-- Stage bar, so the user always knows which part of the task they are in and which parts
+         are done. Week 4, tell people where they are before they have to ask. -->
+    <ol class="stages" id="stages" hidden>
+      <li data-stage="place">Place</li>
+      <li data-stage="season">Season</li>
+      <li data-stage="result">Harvest</li>
+    </ol>
+
+    <p class="status" id="status" data-state="loading">Checking this device</p>
+
+    <pre class="debug" id="debug" hidden></pre>
+
+    <!-- End of season. A centred card rather than another line in the status banner, because it
+         is the only moment in the flow that is an outcome rather than an instruction. -->
+    <div class="result" id="result" hidden>
+      <div class="result-card">
+        <h2 id="resultTitle"></h2>
+
+        <!-- The score. Rows arrive one at a time with their numbers counting up, then the stars,
+             because a number that counts up gets read where one simply present gets glanced at.
+             Every figure is something the game tracked. planner.js fills them in showScore(). -->
+        <div class="score-sheet">
+          <div class="score-line" id="rowPicked" data-shown="0">
+            <span class="score-label">Picked</span>
+            <span class="score-value"></span>
+          </div>
+          <div class="score-line" id="rowFull" data-shown="0">
+            <span class="score-label">Full size</span>
+            <span class="score-value"></span>
+          </div>
+          <div class="score-line" id="rowWeeks" data-shown="0">
+            <span class="score-label">Weeks survived</span>
+            <span class="score-value"></span>
+          </div>
+          <div class="score-line" id="rowLives" data-shown="0">
+            <span class="score-label">Lives lost</span>
+            <span class="score-value"></span>
+          </div>
+        </div>
+
+        <div class="stars" id="stars"></div>
+
+        <p id="resultDetail"></p>
+        <button class="btn btn-primary" id="again" type="button">Plant again</button>
+      </div>
+    </div>
+
+    <div class="hud-bottom">
+
+      <!--
+        The week bar. No tool buttons here on purpose: the can and the bag are objects in the
+        scene that the user picks up and sweeps. Buttons would make the field something you
+        operate rather than something you reach into, and reaching is the part that needs AR.
+
+        `cover` counts how many plants the last sweep actually treated, so a missed corner is
+        visible now rather than a week later when those plants start wilting.
+      -->
+      <div class="season" id="season" hidden>
+        <p class="week" id="week"></p>
+
+        <!-- The scoreboard, which replaced most of the status text. Small numbers can be drawn,
+             so a supply climbing towards trouble is visible a week before it bites. Rows are
+             built in JS from SEASON in crops.js, so the dot count follows the rules. -->
+        <div class="score" id="score">
+          <div class="score-row" data-row="water">
+            <span class="score-name">Water</span>
+            <span class="dots" id="dotsWater"></span>
+            <span class="score-note" id="noteWater"></span>
+          </div>
+          <div class="score-row" data-row="food">
+            <span class="score-name">Food</span>
+            <span class="dots" id="dotsFood"></span>
+            <span class="score-note" id="noteFood"></span>
+          </div>
+          <div class="score-row" data-row="life">
+            <span class="score-name">Life</span>
+            <span class="dots" id="dotsLife"></span>
+            <span class="score-note" id="noteLife"></span>
+          </div>
+          <div class="score-row" data-row="grown">
+            <span class="score-name">Grown</span>
+            <span class="dots" id="dotsGrown"></span>
+            <span class="score-note" id="noteGrown"></span>
+          </div>
+        </div>
+
+        <p class="cover" id="cover"></p>
+        <div class="season-row">
+          <button class="btn btn-primary" id="next" type="button">Skip this week</button>
+          <!-- Without this, a field that lands too far away or half inside a sofa strands the
+               user for the whole session with no way back. Week 4 heuristic 3, user control. -->
+          <button class="btn" id="replace" type="button">Move field</button>
+        </div>
+      </div>
+
+      <!-- Harvest stage. One counter and one way out. The user picks by sweeping a finger over
+           the field, so this bar only says how many are left and offers a way to stop early. -->
+      <div class="harvest" id="harvest" hidden>
+        <p class="week" id="picked"></p>
+        <div class="season-row">
+          <button class="btn" id="finish" type="button">Finish</button>
+        </div>
+      </div>
+
+      <!--
+        The rules. WebXR only grants a session from a tap on this page, so this screen has to
+        exist anyway, and it is the only moment in the flow with no camera feed moving underneath.
+        That makes it the one place text can be read comfortably, so it carries the whole game.
+
+        One rule per line, left aligned, because a wrapped centred sentence is hard to scan on a
+        phone. Water and Food are coloured to match the ring each tool draws on the field, so the
+        words here and the objects in the scene teach the same thing.
+      -->
+      <div class="brief" id="brief" hidden>
+        <h2>How a season works</h2>
+        <ul>
+          <li><b class="water">Water</b> keeps a plant alive.</li>
+          <li><b class="food">Food</b> makes it grow.</li>
+          <li>Take turns. Too much of either kills it.</li>
+        </ul>
+        <p>Five weeks, then harvest what survived.</p>
+      </div>
+
+      <button class="btn btn-primary" id="enter" type="button" hidden>Start</button>
+
+      <!-- Appears only after Start has failed. Asks the browser for a session directly, one
+           feature at a time, so the refusal can be named. See planner.js, session probe. -->
+      <button class="btn" id="diagnose" type="button" hidden>Diagnose</button>
+
+      <a class="btn" id="back" href="./index.html">Back</a>
+    </div>
+  </div>
+
+  <!-- Audio lives outside <a-assets> deliberately. iOS will not preload an audio element without
+       a user gesture, so audio inside a-assets never reports ready and the whole scene blocks
+       until the timeout expires. Out here the sounds load lazily and nothing waits. -->
+  <audio id="sTick"  src="./audio/tick.wav"  preload="none"></audio>
+  <audio id="sPlace" src="./audio/place.wav" preload="none"></audio>
+  <audio id="sWarn"  src="./audio/warn.wav"  preload="none"></audio>
+  <audio id="sOk"    src="./audio/ok.wav"    preload="none"></audio>
+  <audio id="sGrow"  src="./audio/grow.wav"  preload="none"></audio>
+
+  <!--
+    TWO WARNINGS, both of which have already cost a day each.
+
+    1. Never put a comment inside an opening tag. The browser reads the comment's closing marker
+       as an attribute name plus the greater-than sign that ends the tag, so every attribute
+       after it is silently dropped into the page as text. That is what once hid ar-hit-test.
+
+    2. Never type that closing marker inside a comment either. It ends the comment there, and
+       the rest lands on the page as visible text. This is why it is described in words here.
+
+    webxr: hit-test is required, because without it there is no way to find the ground.
+    A-Frame's own default requiredFeatures is ["local-floor"], which this line replaces.
+    dom-overlay keeps the HUD on screen once the immersive session takes over.
+
+    ar-hit-test mapSize is a fallback. planner.js overwrites it at boot with PLOT_SIZE_M, so the
+    placement marker is always exactly the field's footprint. To make the marker smaller, change
+    PLOT_SIZE_M in crops.js and both shrink together.
+  -->
+  <a-scene
+    id="scene"
+    webxr="requiredFeatures: hit-test;
+           optionalFeatures: anchors, dom-overlay, local-floor;
+           overlayElement: #hud"
+    loading-screen="enabled: false"
+    background="color: #0f1410"
+    ar-hit-test="target: #plot; type: map; mapSize: 1.2 1.2"
+    renderer="colorManagement: true; physicallyCorrectLights: true"
+    shadow="type: pcfsoft"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false">
+
+    <a-assets timeout="8000">
+      <!-- Paddy only. The whole field is one crop, so crop-b.glb was 74 KB this page downloaded,
+           waited for inside <a-assets>, and never drew. It belongs to marker.html. -->
+      <a-asset-item id="cropA" src="./models/crop-a.glb"></a-asset-item>
+
+      <!--
+        Fence, can and bag. All three are sized from their own bounding boxes in crops.js,
+        because none of them are authored in metres.
+
+        The `m` prefix is not decoration. These ids used to match the scene containers below, so
+        `fence` existed twice in this file. getElementById returns the first match in document
+        order, which meant every fence section was appended into <a-assets> and never rendered.
+        Asset ids and entity ids share one namespace and must not collide.
+      -->
+      <a-asset-item id="mFence" src="./models/fence.glb"></a-asset-item>
+      <a-asset-item id="mCan" src="./models/can.glb"></a-asset-item>
+      <a-asset-item id="mBag" src="./models/bag.glb"></a-asset-item>
+    </a-assets>
+
+    <!-- look-controls off. The camera pose comes from WebXR in session, and leaving it on makes
+         iOS prompt for Motion and Orientation access on a page that never uses it. -->
+    <a-camera position="0 1.6 0" look-controls="enabled: false" wasd-controls="enabled: false"></a-camera>
+
+    <!-- The directional light casts, which is what makes a placed plant read as sitting on the
+         floor rather than floating in front of the camera. Week 4, objects cast shadows. -->
+    <a-entity light="type: ambient; intensity: 0.9; color: #ffffff"></a-entity>
+    <a-entity light="type: directional; intensity: 0.7; castShadow: true;
+                     shadowMapWidth: 1024; shadowMapHeight: 1024;
+                     shadowCameraLeft: -2; shadowCameraRight: 2;
+                     shadowCameraTop: 2; shadowCameraBottom: -2"
+              position="1.5 3 1"></a-entity>
+
+    <!-- The plot. ar-hit-test moves this entity to wherever the user taps, then hit testing is
+         switched off so later taps tend the field instead of moving the ground. -->
+    <a-entity id="plot" visible="false">
+
+      <!-- The bed and the fence are built in JS because their dimensions come from PLOT_SIZE_M
+           and BED_HEIGHT_M in crops.js. Writing the numbers here too would create a second
+           source of truth that could drift out of step with the spacing rule. -->
+      <a-entity id="bed"></a-entity>
+      <a-entity id="fence"></a-entity>
+
+      <!-- Watering can and fertiliser bag. Built in JS from TOOLS in crops.js, so their reach,
+           resting place and scale live next to the numbers the season rule uses. -->
+      <a-entity id="tools"></a-entity>
+
+      <!--
+        Soil surface. Both the visible top of the bed and the plane the drag raycast hits, so it
+        is the reference every plant coordinate is measured from.
+
+        The width and height below are a fallback only. planner.js overwrites both from
+        PLOT_SIZE_M, because a plane wider than the bed is an invisible apron the user can pull a
+        tool out onto.
+      -->
+      <a-plane
+        id="plotGround"
+        rotation="-90 0 0"
+        width="1.2"
+        height="1.2"
+        shadow="receive: true; cast: false"
+        material="color: #6b4c33; roughness: 1; metalness: 0; side: double"></a-plane>
+
+      <a-entity id="plants"></a-entity>
+
+      <!-- The hand. A ring that follows the finger across the soil during the harvest and picks
+           the ripe plants inside it. Not a model, because a circle under the finger reads as
+           your own reach rather than a third implement to find. Its radius is set from
+           HARVEST.reachM, so it is exactly the area it picks. -->
+      <a-ring
+        id="hand"
+        visible="false"
+        rotation="-90 0 0"
+        radius-inner="0.30"
+        radius-outer="0.34"
+        material="color: #f2c14e; opacity: 0.65; transparent: true; side: double; shader: flat"
+      ></a-ring>
+    </a-entity>
+
+  </a-scene>
+
+  <script src="./js/crops.js"></script>
+  <script src="./js/planner.js"></script>
+
+</body>
+</html>

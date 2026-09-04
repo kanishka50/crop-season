@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Scan a seed packet</title>
+
+  <!-- Pinned versions. A-Frame 1.5.0 with MindAR 1.2.5 is the pairing MindAR's own installation
+       page documents. Do not bump these mid-project. -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="ar">
+
+  <!-- Shown only when the marker file or the models have not been added yet. -->
+  <div class="setup" id="setup" hidden>
+    <div class="setup-card">
+      <h2>Setup not finished</h2>
+      <p id="setupDetail"></p>
+      <ol>
+        <li>Generate the seed packet card with <code>tools/make_markers.py</code>, or photograph
+            one. Busy and high contrast tracks well, plain does not.</li>
+        <li>Compile the image at the MindAR compiler, then save the result as
+            <code>targets/targets.mind</code>.</li>
+        <li>Drop the plant model into <code>models/</code> as <code>crop-b.glb</code>.</li>
+      </ol>
+      <a class="btn" href="./index.html">Back</a>
+    </div>
+  </div>
+
+  <!-- Outside <a-assets> on purpose. iOS will not preload audio without a user gesture, and
+       inside the asset block that stalls the whole scene until the timeout expires. -->
+  <audio id="sTick" src="./audio/tick.wav" preload="none"></audio>
+  <audio id="sGrow" src="./audio/grow.wav" preload="none"></audio>
+
+  <div class="hud">
+    <p class="status" id="status" data-state="loading">Starting the camera</p>
+
+    <!-- Tap the status banner to toggle. Renders tracking state into the page, because a
+         breakpoint is not available mid AR session on a phone. -->
+    <pre class="debug" id="debug" hidden></pre>
+
+    <div class="hud-bottom">
+      <p class="hint" id="hint" hidden>Tap anywhere to grow it to full size</p>
+      <a class="btn btn-primary" id="handoff" href="./markerless.html" hidden>
+        Now grow a season
+      </a>
+      <a class="btn" href="./index.html">Back</a>
+    </div>
+  </div>
+
+  <a-scene
+    id="scene"
+    mindar-image="imageTargetSrc: ./targets/targets.mind; autoStart: false; uiLoading: no; uiScanning: no; uiError: no"
+    color-space="sRGB"
+    renderer="colorManagement: true; physicallyCorrectLights: true"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false">
+
+    <!-- Only the pineapple. The paddy model belongs to markerless mode, where the whole field is
+         paddy, and loading it here would be a download this page never draws. -->
+    <a-assets timeout="20000">
+      <a-asset-item id="cropB" src="./models/crop-b.glb"></a-asset-item>
+    </a-assets>
+
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+    <!-- Two lights, not one. A single directional light leaves the underside of the model black,
+         which reads as pasted on rather than lit by the room. -->
+    <a-entity light="type: ambient; intensity: 0.85; color: #ffffff"></a-entity>
+    <a-entity light="type: directional; intensity: 0.75; castShadow: true"
+              position="1 2 1"></a-entity>
+
+    <!--
+      The pineapple card, and the only card. targets.mind holds one image, so it is targetIndex 0.
+
+      That index is positional, not named: it is whatever order the images went into the compiler.
+      The script below maps it to a crop explicitly rather than by loop position, so adding a
+      second card later cannot silently print one crop's spacing on another crop's card.
+    -->
+    <a-entity id="target0" mindar-image-target="targetIndex: 0">
+      <!-- Scale comes from crops.js, so the card and the plot planner cannot disagree about the
+           crop. The two crop models differ in their source units by a factor of three, so a
+           literal here would be wrong for one of them. -->
+      <a-gltf-model
+        id="model0"
+        src="#cropB"
+        position="0 0 0.02"
+        rotation="90 0 0"
+        animation="property: rotation; to: 90 6 0; dir: alternate; dur: 2600; loop: true; easing: easeInOutSine">
+      </a-gltf-model>
+
+      <a-entity id="label0"
+        text="value: ; align: center; width: 1.1; color: #eef3ee; wrapCount: 26"
+        position="0 -0.36 0.02">
+      </a-entity>
+
+      <a-plane position="0 -0.36 0.015" width="0.86" height="0.17"
+               material="color: #0f1410; opacity: 0.72; shader: flat"></a-plane>
+    </a-entity>
+
+  </a-scene>
+
+  <script src="./js/crops.js"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    var statusEl = document.getElementById('status');
+    var handoffEl = document.getElementById('handoff');
+    var sceneEl = document.getElementById('scene');
+    var seen = {};
+
+    function say(text, state) {
+      statusEl.textContent = text;
+      statusEl.dataset.state = state || 'idle';
+    }
+
+    /*
+     * Which crop is on which card, in the order the images were compiled into targets.mind.
+     *
+     * Stated by id rather than taken from the position in CROPS. The two are not the same list:
+     * CROPS holds every crop the project knows about and its first entry, paddy, is the one the
+     * plot planner grows a whole field of. Only the pineapple has a printed card.
+     *
+     * Pairing them by loop position is what would put "Paddy, plant 25 cm apart" under a
+     * pineapple, with nothing anywhere to say it was wrong.
+     */
+    var CARD_CROP_IDS = ['crop-b'];
+
+    var CARDS = CARD_CROP_IDS.map(function (id) {
+      var crop = CROPS.filter(function (c) { return c.id === id; })[0];
+      if (!crop) { throw new Error('marker.html expects a crop with id ' + id + ' in crops.js'); }
+      return crop;
+    });
+
+    // Labels and scales come from crops.js, so both modes quote the same spacing figure.
+    CARDS.forEach(function (crop, i) {
+      var label = document.getElementById('label' + i);
+      if (label) {
+        label.setAttribute('text', 'value',
+          crop.name + '\nplant ' + crop.spacingCm + ' cm apart');
+      }
+
+      var model = document.getElementById('model' + i);
+      if (model) {
+        var s = crop.markerScale;
+        model.setAttribute('scale', s + ' ' + s + ' ' + s);
+      }
+    });
+
+    // Preflight. A missing targets.mind does not throw, it leaves the page on a loader with no
+    // explanation. Checking first turns a silent hang into a message that says what to do.
+    function exists(url) {
+      return fetch(url, { method: 'HEAD' })
+        .then(function (r) { return r.ok; })
+        .catch(function () { return false; });
+    }
+
+    function showSetup(missing) {
+      document.getElementById('setupDetail').textContent =
+        'These files are missing: ' + missing.join(', ') + '.';
+      document.getElementById('setup').hidden = false;
+    }
+
+    // Built from CARDS, so adding a card cannot leave its model unchecked.
+    var NEEDED = ['targets/targets.mind'].concat(CARDS.map(function (c) {
+      return c.model.replace('./', '');
+    }));
+
+    Promise.all(NEEDED.map(function (n) { return exists('./' + n); })).then(function (found) {
+      var missing = NEEDED.filter(function (_, i) { return !found[i]; });
+
+      if (missing.length) {
+        showSetup(missing);
+        return;
+      }
+
+      start();
+    });
+
+    // Start MindAR only after the scene has loaded. Starting early fails quietly: the camera
+    // opens and nothing ever tracks. autoStart is off above so this ordering is explicit.
+    function start() {
+      function begin() {
+        var system = sceneEl.systems['mindar-image-system'];
+
+        if (!system) {
+          say('Tracking system did not load. Reload the page.', 'error');
+          return;
+        }
+
+        system.start();
+        say('Point your camera at a seed packet');
+      }
+
+      if (sceneEl.hasLoaded) {
+        begin();
+      } else {
+        sceneEl.addEventListener('loaded', begin, { once: true });
+      }
+    }
+
+    var hintEl = document.getElementById('hint');
+    var current = null;   // { crop, index } while a card is in view
+    var grown = {};       // per crop, whether it is showing mature size
+
+    function cue(id) {
+      var a = document.getElementById(id);
+      if (!a) { return; }
+      try { a.currentTime = 0; a.play(); } catch (e) { /* autoplay policy */ }
+    }
+
+    function setLabel(i, crop) {
+      var label = document.getElementById('label' + i);
+      if (!label) { return; }
+      label.setAttribute('text', 'value', grown[crop.id]
+        ? crop.name + ' at full size\nneeds ' + crop.spacingCm + ' cm of room'
+        : crop.name + '\nplant ' + crop.spacingCm + ' cm apart');
+    }
+
+    /*
+     * Tap to preview mature size. The packet says 25 cm apart and the obvious reply is "why that
+     * much", so growing the plant on the card shows how much room it ends up needing. The plot
+     * planner then teaches the same thing at real scale on real ground.
+     *
+     * The tap target is the whole screen rather than the model, because a small plant seen at
+     * arm's length is a hard target. Week 4, forgiving AR targets.
+     */
+    function toggleGrow() {
+      if (!current) { return; }
+
+      var crop = current.crop;
+      var model = document.getElementById('model' + current.index);
+      if (!model) { return; }
+
+      grown[crop.id] = !grown[crop.id];
+
+      var from = crop.markerScale;
+      var to = crop.markerScale * 2;
+      var a = grown[crop.id] ? from : to;
+      var b = grown[crop.id] ? to : from;
+
+      model.setAttribute('animation__grow',
+        'property: scale; from: ' + a + ' ' + a + ' ' + a +
+        '; to: ' + b + ' ' + b + ' ' + b +
+        '; dur: 900; easing: easeOutCubic');
+
+      setLabel(current.index, crop);
+      say(grown[crop.id]
+        ? crop.name + ' at full size. This is why it needs ' + crop.spacingCm + ' cm'
+        : crop.name + ', plant ' + crop.spacingCm + ' cm apart', 'found');
+
+      cue(grown[crop.id] ? 'sGrow' : 'sTick');
+      if (navigator.vibrate) { navigator.vibrate(grown[crop.id] ? [30, 40, 90] : 16); }
+    }
+
+    window.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('.hud-bottom, .debug, .status')) {
+        return;
+      }
+      toggleGrow();
+    });
+
+    // Per target status. Silence during scanning reads as a broken app.
+    CARDS.forEach(function (crop, i) {
+      var target = document.getElementById('target' + i);
+      if (!target) { return; }
+
+      target.addEventListener('targetFound', function () {
+        seen[crop.id] = true;
+        current = { crop: crop, index: i };
+        hintEl.hidden = false;
+        setLabel(i, crop);
+
+        say(grown[crop.id]
+          ? crop.name + ' at full size. This is why it needs ' + crop.spacingCm + ' cm'
+          : crop.name + ', plant ' + crop.spacingCm + ' cm apart', 'found');
+
+        if (navigator.vibrate) { navigator.vibrate(18); }
+
+        // Offer the handoff once at least one crop has been seen.
+        handoffEl.hidden = false;
+      });
+
+      target.addEventListener('targetLost', function () {
+        current = null;
+        hintEl.hidden = true;
+
+        var count = Object.keys(seen).length;
+        say(count < CARDS.length
+          ? 'Looking for a seed packet. ' + count + ' of ' + CARDS.length + ' found so far'
+          : 'Packet found. Point at it again, or go and grow a season');
+      });
+    });
+
+    // The handoff must not send the user to a wall. Markerless needs WebXR, which iOS does not
+    // provide, so check here and label the button honestly rather than letting them find out on
+    // arrival. The link still works, because the destination explains the requirement.
+    (function labelHandoff() {
+      function block(note) {
+        handoffEl.textContent = 'Growing a season needs an Android phone';
+        handoffEl.classList.remove('btn-primary');
+        handoffEl.classList.add('is-blocked');
+        handoffEl.title = note;
+      }
+
+      if (!navigator.xr) {
+        block('This browser does not provide WebXR.');
+        return;
+      }
+
+      navigator.xr.isSessionSupported('immersive-ar').then(function (ok) {
+        if (!ok) { block('This device cannot start an immersive AR session.'); }
+      }).catch(function () {
+        block('The AR support check failed.');
+      });
+    }());
+
+    // On-screen debug readout. A black camera feed while tracking still works is a display
+    // problem, not a capture problem, and the two look identical from the outside. These fields
+    // separate them: a live stream with real dimensions means something is painting over it.
+    var debugEl = document.getElementById('debug');
+    var frames = 0;
+    var fps = 0;
+
+    (function countFrames() {
+      frames++;
+      requestAnimationFrame(countFrames);
+    }());
+
+    setInterval(function () {
+      fps = frames;
+      frames = 0;
+      if (!debugEl.hidden) { renderDebug(); }
+    }, 1000);
+
+    function renderDebug() {
+      var video = document.querySelector('video');
+      var canvas = document.querySelector('canvas.a-canvas');
+      var lines = [];
+
+      lines.push('fps            ' + fps);
+
+      if (!video) {
+        lines.push('video          NOT IN DOM');
+      } else {
+        var vs = getComputedStyle(video);
+        lines.push('video size     ' + video.videoWidth + ' x ' + video.videoHeight);
+        lines.push('readyState     ' + video.readyState + ' (4 = has data)');
+        lines.push('paused         ' + video.paused);
+        lines.push('video z-index  ' + vs.zIndex);
+        lines.push('video position ' + vs.position);
+        lines.push('video display  ' + vs.display);
+        lines.push('video opacity  ' + vs.opacity);
+      }
+
+      if (canvas) {
+        lines.push('canvas         ' + canvas.width + ' x ' + canvas.height);
+        lines.push('canvas bg      ' + getComputedStyle(canvas).backgroundColor);
+      } else {
+        lines.push('canvas         NOT IN DOM');
+      }
+
+      lines.push('body bg        ' + getComputedStyle(document.body).backgroundColor);
+      lines.push('targets seen   ' + Object.keys(seen).join(', ') || 'none yet');
+
+      debugEl.textContent = lines.join('\n');
+    }
+
+    statusEl.addEventListener('click', function () {
+      debugEl.hidden = !debugEl.hidden;
+      if (!debugEl.hidden) { renderDebug(); }
+    });
+
+    // Camera permission is the other common wall. Say what happened rather than hanging.
+    window.addEventListener('unhandledrejection', function (e) {
+      var name = e.reason && e.reason.name ? e.reason.name : '';
+      if (name === 'NotAllowedError') {
+        say('Camera permission was refused. Allow it and reload.', 'error');
+      } else if (name === 'NotFoundError') {
+        say('No camera found on this device.', 'error');
+      }
+    });
+  }());
+  </script>
+
+</body>
+</html>
